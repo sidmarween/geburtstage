@@ -176,9 +176,12 @@ class MainActivity : Activity() {
             header.text = ""
             return
         }
-        val next = items.firstOrNull { !it.muted } ?: items.first()
-        val d = next.daysUntil()
-        var text = "${items.size} Geburtstage · als Nächstes: ${next.name} ${Fmt.inDays(d)}"
+        val next = items.firstOrNull { !it.muted && !it.deceased }
+        var text = if (next != null) {
+            "${items.size} Geburtstage · als Nächstes: ${next.name} ${Fmt.inDays(next.daysUntil())}"
+        } else {
+            "${items.size} Geburtstage"
+        }
         val round = items.firstOrNull { !it.muted && it.isRound() && it.daysUntil() <= roundDays }
         if (round != null) {
             text += "\n🎉 Runder Geburtstag: ${round.name} wird ${round.turningAge()} – ${Fmt.inDays(round.daysUntil())}!"
@@ -197,6 +200,7 @@ class MainActivity : Activity() {
             actions.add(action)
         }
         option(if (b.muted) "🔔  Erinnerungen wieder an" else "🔕  Stummschalten") { toggleMute(b) }
+        option(if (b.deceased) "↩️  Markierung „verstorben“ aufheben" else "🕊️  Als verstorben markieren") { toggleDeceased(b) }
         option(if (ownPhoto) "📷  Anderes Foto wählen" else "📷  Foto wählen") { pickPhoto(b) }
         if (ownPhoto) option("🖼️  Eigenes Foto entfernen") { removePhoto(b) }
         option("✏️  Bearbeiten") { showEditDialog(b) }
@@ -252,6 +256,31 @@ class MainActivity : Activity() {
     override fun onRestoreInstanceState(savedInstanceState: Bundle) {
         super.onRestoreInstanceState(savedInstanceState)
         pendingPhotoId = savedInstanceState.getString("pendingPhotoId")
+    }
+
+    private fun toggleDeceased(b: Birthday) {
+        val newState = !b.deceased
+        val markNow = {
+            val app = applicationContext
+            SyncEngine.submit {
+                SyncEngine.mutate(app) { list, _ -> list.firstOrNull { it.id == b.id }?.deceased = newState }
+                runOnUiThread { refresh() }
+            }
+        }
+        if (!newState) {
+            markNow()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("${b.name} als verstorben markieren?")
+            .setMessage(
+                "Der Eintrag bleibt in der Liste. Statt „hat Geburtstag“ steht dort dann " +
+                    "„wäre … geworden“, und es gibt keine Erinnerungen vorher mehr." +
+                    "\n\nAm Geburtstag selbst kommt nur ein stiller Hinweis (abschaltbar in den Einstellungen)."
+            )
+            .setPositiveButton("Markieren") { _, _ -> markNow() }
+            .setNegativeButton("Abbrechen", null)
+            .show()
     }
 
     private fun toggleMute(b: Birthday) {
@@ -487,6 +516,12 @@ class MainActivity : Activity() {
         }
         box.addView(onDay)
 
+        val deceasedDay = CheckBox(this).apply {
+            text = "Bei Verstorbenen am Geburtstag still daran erinnern"
+            isChecked = s.notifyDeceased
+        }
+        box.addView(deceasedDay)
+
         val contactsToCal = CheckBox(this).apply {
             text = "Geburtstage aus Kontakten auch in den Kalender eintragen"
             isChecked = s.contactsToCalendar
@@ -509,6 +544,7 @@ class MainActivity : Activity() {
                 s.roundDaysBefore = roundPicker.value
                 s.hour = hourPicker.value
                 s.notifyOnDay = onDay.isChecked
+                s.notifyDeceased = deceasedDay.isChecked
                 s.contactsToCalendar = contactsToCal.isChecked
                 Reminders.schedule(this)
                 runSync(false)
@@ -610,7 +646,7 @@ class BirthdayRow(ctx: Context) : LinearLayout(ctx) {
     fun bind(b: Birthday, today: LocalDate, daysBefore: Int, roundDays: Int) {
         val d = b.daysUntil(today)
         val age = b.turningAge(today)
-        val round = Birthday.isRoundAge(age) && d <= roundDays && !b.muted
+        val round = b.isRound(today) && d <= roundDays && !b.muted
 
         // Foto oder Initialen
         avatarInitials.text = initials(b.name)
@@ -622,6 +658,11 @@ class BirthdayRow(ctx: Context) : LinearLayout(ctx) {
 
         // Tage-Anzeige rechts
         when {
+            b.deceased -> {
+                badge.text = if (d == 0) "🕊️ Heute" else "$d Tage"
+                badgeBg.setColor(Color.parseColor("#22888888"))
+                badge.setTextColor(nameView.currentTextColor)
+            }
             d == 0 -> {
                 badge.text = "🎂 Heute"
                 badgeBg.setColor(Color.parseColor("#E91E63"))
@@ -658,11 +699,22 @@ class BirthdayRow(ctx: Context) : LinearLayout(ctx) {
             SOURCE_CALENDAR -> " 📅"
             else -> ""
         }
-        nameView.text = (if (b.muted) "🔕 " else "") + b.name + source
-        nameView.alpha = if (b.muted) 0.5f else 1f
+        val prefix = when {
+            b.deceased -> "🕊️ "
+            b.muted -> "🔕 "
+            else -> ""
+        }
+        nameView.text = prefix + b.name + source
+        nameView.alpha = if (b.muted || b.deceased) 0.6f else 1f
+        avatarImage.alpha = if (b.deceased) 0.6f else 1f
 
         val parts = mutableListOf(Fmt.date(b.month, b.day, null))
-        if (round) {
+        if (b.deceased) {
+            if (age != null) parts.add(if (d == 0) "wäre heute $age geworden" else "wäre $age geworden")
+            else parts.add("verstorben")
+            subView.setTypeface(null, Typeface.ITALIC)
+            subView.alpha = 0.7f
+        } else if (round) {
             parts.add("🎉 wird $age – runder Geburtstag!")
             subView.setTypeface(null, Typeface.BOLD)
             subView.alpha = 1f

@@ -10,6 +10,7 @@ Android-App, die an Geburtstage erinnert.
 - Einzelne Geburtstage stummschalten (lange drücken oder über die Benachrichtigung)
 - Fotos aus den Kontakten, oder ein eigenes Foto aus der Galerie
 - Runde Geburtstage (30, 40, 50 …) werden golden markiert und zusätzlich 30 Tage vorher besonders auffällig angekündigt
+- Personen als verstorben markieren: „wäre … geworden“ statt Geburtstags-Erinnerung, auf Wunsch stiller Hinweis am Tag selbst
 
 ## APK herunterladen
 

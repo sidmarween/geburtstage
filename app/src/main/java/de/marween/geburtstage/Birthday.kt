@@ -28,7 +28,8 @@ data class Birthday(
     var calendarEventId: Long? = null,
     var calendarSig: String? = null,
     var inForeignCalendar: Boolean = false,
-    var contactLookup: String? = null
+    var contactLookup: String? = null,
+    var deceased: Boolean = false
 ) {
     /** Datum in einem bestimmten Jahr (29. Februar wird in Nicht-Schaltjahren zum 28.). */
     fun dateIn(y: Int): LocalDate =
@@ -49,7 +50,7 @@ data class Birthday(
     fun matchKey(): String = matchKey(name, month, day)
 
     /** Runder Geburtstag (30, 40, 50 …) – nur erkennbar, wenn das Geburtsjahr bekannt ist. */
-    fun isRound(today: LocalDate = LocalDate.now()): Boolean = isRoundAge(turningAge(today))
+    fun isRound(today: LocalDate = LocalDate.now()): Boolean = !deceased && isRoundAge(turningAge(today))
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -64,6 +65,7 @@ data class Birthday(
         put("calendarSig", calendarSig ?: JSONObject.NULL)
         put("inForeignCalendar", inForeignCalendar)
         put("contactLookup", contactLookup ?: JSONObject.NULL)
+        put("deceased", deceased)
     }
 
     companion object {
@@ -85,7 +87,8 @@ data class Birthday(
             calendarEventId = if (o.isNull("calendarEventId")) null else o.getLong("calendarEventId"),
             calendarSig = if (o.isNull("calendarSig")) null else o.getString("calendarSig"),
             inForeignCalendar = o.optBoolean("inForeignCalendar", false),
-            contactLookup = if (o.isNull("contactLookup")) null else o.getString("contactLookup")
+            contactLookup = if (o.isNull("contactLookup")) null else o.getString("contactLookup"),
+            deceased = o.optBoolean("deceased", false)
         )
 
         fun isRoundAge(age: Int?): Boolean = age != null && age >= 10 && age % 10 == 0
@@ -188,6 +191,11 @@ class Store(ctx: Context) {
     var roundDaysBefore: Int
         get() = prefs.getInt("roundDaysBefore", 30)
         set(v) { prefs.edit().putInt("roundDaysBefore", v).apply() }
+
+    /** Am Geburtstag verstorbener Personen still daran erinnern. */
+    var notifyDeceased: Boolean
+        get() = prefs.getBoolean("notifyDeceased", true)
+        set(v) { prefs.edit().putBoolean("notifyDeceased", v).apply() }
 
     var contactsToCalendar: Boolean
         get() = prefs.getBoolean("contactsToCalendar", false)

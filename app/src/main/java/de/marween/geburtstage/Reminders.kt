@@ -79,6 +79,11 @@ object Reminders {
             if (b.muted) continue
             val d = b.daysUntil(today)
             val next = b.nextDate(today)
+            if (b.deceased) {
+                // Verstorbene: keine Vorab-Erinnerung, nur auf Wunsch ein stiller Hinweis am Tag selbst
+                if (d == 0 && store.notifyDeceased && log.add("${b.id}|day|$next")) notify(ctx, b, 0)
+                continue
+            }
             val round = b.isRound(today)
             if (d == 0) {
                 // Am runden Geburtstag immer erinnern
@@ -101,12 +106,15 @@ object Reminders {
 
         val age = b.turningAge()
         val next = b.nextDate()
-        val round = Birthday.isRoundAge(age)
+        val round = !b.deceased && Birthday.isRoundAge(age)
         val dateText = Fmt.date(next.monthValue, next.dayOfMonth, null)
 
         val title: String
         val text: String
-        if (round) {
+        if (b.deceased) {
+            title = if (age != null) "🕊️ Heute wäre ${b.name} $age geworden" else "🕊️ Heute ist der Geburtstag von ${b.name}"
+            text = "In Gedenken"
+        } else if (round) {
             title = "🎉 RUNDER GEBURTSTAG: ${b.name} wird $age!"
             text = when (days) {
                 0 -> "Heute ist der große Tag! 🥳"

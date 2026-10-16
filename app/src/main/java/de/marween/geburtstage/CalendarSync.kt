@@ -133,10 +133,15 @@ object CalendarSync {
         val start = LocalDate.of(startYear, b.month, b.day)
             .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         val rrule = if (b.month == 2 && b.day == 29) "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1" else "FREQ=YEARLY"
-        val info = if (b.year != null) "Geburtstag (geboren ${b.year})" else "Geburtstag"
+        val info = when {
+            b.deceased && b.year != null -> "Gedenken an den Geburtstag (geboren ${b.year})"
+            b.deceased -> "Gedenken an den Geburtstag"
+            b.year != null -> "Geburtstag (geboren ${b.year})"
+            else -> "Geburtstag"
+        }
         return ContentValues().apply {
             put("calendar_id", calId)
-            put("title", "🎂 ${b.name}")
+            put("title", if (b.deceased) "🕊️ ${b.name}" else "🎂 ${b.name}")
             put("description", "$info\n$MARKER")
             put("dtstart", start)
             put("duration", "P1D")
@@ -148,7 +153,7 @@ object CalendarSync {
         }
     }
 
-    private fun signature(b: Birthday, calId: Long) = "$calId|${b.name}|${b.month}|${b.day}|${b.year}"
+    private fun signature(b: Birthday, calId: Long) = "$calId|${b.name}|${b.month}|${b.day}|${b.year}|${b.deceased}"
 
     /** Bringt die eigenen Kalendereinträge auf den Stand der Liste. */
     fun writeAll(ctx: Context, list: List<Birthday>, store: Store) {
