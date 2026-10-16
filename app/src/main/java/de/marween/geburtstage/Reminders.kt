@@ -112,8 +112,8 @@ object Reminders {
         val title: String
         val text: String
         if (b.deceased) {
-            title = if (age != null) "🕊️ Heute wäre ${b.name} $age geworden" else "🕊️ Heute ist der Geburtstag von ${b.name}"
-            text = "In Gedenken"
+            title = "🕊️ Heute hätte ${b.name} Geburtstag gehabt"
+            text = if (age != null) "${b.name} wäre heute $age geworden · In Gedenken" else "In Gedenken"
         } else if (round) {
             title = "🎉 RUNDER GEBURTSTAG: ${b.name} wird $age!"
             text = when (days) {

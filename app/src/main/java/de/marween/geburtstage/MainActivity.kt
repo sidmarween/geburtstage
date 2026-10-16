@@ -182,6 +182,10 @@ class MainActivity : Activity() {
         } else {
             "${items.size} Geburtstage"
         }
+        items.filter { it.deceased && it.daysUntil() == 0 }.forEach { p ->
+            val age = p.turningAge()
+            text += "\n🕊️ Heute hätte ${p.name} Geburtstag gehabt" + (if (age != null) " (wäre $age geworden)" else "")
+        }
         val round = items.firstOrNull { !it.muted && it.isRound() && it.daysUntil() <= roundDays }
         if (round != null) {
             text += "\n🎉 Runder Geburtstag: ${round.name} wird ${round.turningAge()} – ${Fmt.inDays(round.daysUntil())}!"
@@ -710,8 +714,10 @@ class BirthdayRow(ctx: Context) : LinearLayout(ctx) {
 
         val parts = mutableListOf(Fmt.date(b.month, b.day, null))
         if (b.deceased) {
-            if (age != null) parts.add(if (d == 0) "wäre heute $age geworden" else "wäre $age geworden")
-            else parts.add("verstorben")
+            parts.clear()
+            if (d == 0) parts.add("Hätte heute Geburtstag gehabt")
+            else parts.add("Hätte am ${Fmt.date(b.month, b.day, null)} Geburtstag gehabt")
+            if (age != null) parts.add("wäre $age geworden")
             subView.setTypeface(null, Typeface.ITALIC)
             subView.alpha = 0.7f
         } else if (round) {
