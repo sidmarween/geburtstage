@@ -31,4 +31,24 @@ object ContactsImport {
         }
         return out.distinctBy { it.key }
     }
+
+    /** Kontakte mit Foto: Name (klein geschrieben) -> Kontakt-Schlüssel. */
+    fun contactsWithPhoto(ctx: Context): Map<String, String> {
+        if (!hasPermission(ctx)) return emptyMap()
+        val out = HashMap<String, String>()
+        ctx.contentResolver.query(
+            ContactsContract.Contacts.CONTENT_URI, arrayOf("lookup", "display_name"),
+            "photo_id IS NOT NULL", null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val key = c.getString(0) ?: continue
+                val name = c.getString(1) ?: continue
+                out[normalize(name)] = key
+            }
+        }
+        return out
+    }
+
+    fun normalize(name: String): String =
+        name.trim().lowercase(java.util.Locale.GERMAN).replace(Regex("\\s+"), " ")
 }

@@ -27,7 +27,8 @@ data class Birthday(
     var muted: Boolean = false,
     var calendarEventId: Long? = null,
     var calendarSig: String? = null,
-    var inForeignCalendar: Boolean = false
+    var inForeignCalendar: Boolean = false,
+    var contactLookup: String? = null
 ) {
     /** Datum in einem bestimmten Jahr (29. Februar wird in Nicht-Schaltjahren zum 28.). */
     fun dateIn(y: Int): LocalDate =
@@ -47,6 +48,9 @@ data class Birthday(
 
     fun matchKey(): String = matchKey(name, month, day)
 
+    /** Runder Geburtstag (30, 40, 50 …) – nur erkennbar, wenn das Geburtsjahr bekannt ist. */
+    fun isRound(today: LocalDate = LocalDate.now()): Boolean = isRoundAge(turningAge(today))
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)
@@ -59,6 +63,7 @@ data class Birthday(
         put("calendarEventId", calendarEventId ?: JSONObject.NULL)
         put("calendarSig", calendarSig ?: JSONObject.NULL)
         put("inForeignCalendar", inForeignCalendar)
+        put("contactLookup", contactLookup ?: JSONObject.NULL)
     }
 
     companion object {
@@ -79,8 +84,11 @@ data class Birthday(
             muted = o.optBoolean("muted", false),
             calendarEventId = if (o.isNull("calendarEventId")) null else o.getLong("calendarEventId"),
             calendarSig = if (o.isNull("calendarSig")) null else o.getString("calendarSig"),
-            inForeignCalendar = o.optBoolean("inForeignCalendar", false)
+            inForeignCalendar = o.optBoolean("inForeignCalendar", false),
+            contactLookup = if (o.isNull("contactLookup")) null else o.getString("contactLookup")
         )
+
+        fun isRoundAge(age: Int?): Boolean = age != null && age >= 10 && age % 10 == 0
     }
 }
 
@@ -175,6 +183,11 @@ class Store(ctx: Context) {
     var calendarChosen: Boolean
         get() = prefs.getBoolean("calendarChosen", false)
         set(v) { prefs.edit().putBoolean("calendarChosen", v).apply() }
+
+    /** Bei runden Geburtstagen zusätzlich so viele Tage vorher erinnern. */
+    var roundDaysBefore: Int
+        get() = prefs.getInt("roundDaysBefore", 30)
+        set(v) { prefs.edit().putInt("roundDaysBefore", v).apply() }
 
     var contactsToCalendar: Boolean
         get() = prefs.getBoolean("contactsToCalendar", false)

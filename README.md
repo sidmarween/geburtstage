@@ -8,6 +8,8 @@ Android-App, die an Geburtstage erinnert.
 - Trägt eigene Geburtstage als jährlichen Termin in den Google-Kalender ein (über das Google-Konto auf dem Handy)
 - Erinnert ein paar Tage vorher (Standard: 7 Tage) und am Tag selbst
 - Einzelne Geburtstage stummschalten (lange drücken oder über die Benachrichtigung)
+- Fotos aus den Kontakten, oder ein eigenes Foto aus der Galerie
+- Runde Geburtstage (30, 40, 50 …) werden golden markiert und zusätzlich 30 Tage vorher besonders auffällig angekündigt
 
 ## APK herunterladen
 

@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     private val adapter = BirthdayAdapter()
     private var items: List<Birthday> = emptyList()
     private var daysBefore = 7
+    private var roundDays = 30
+    private var pendingPhotoId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -143,9 +145,11 @@ class MainActivity : Activity() {
                 compareBy<Birthday> { it.daysUntil(today) }.thenBy { it.name.lowercase() }
             )
             val before = store.daysBefore
+            val roundBefore = store.roundDaysBefore
             runOnUiThread {
                 items = sorted
                 daysBefore = before
+                roundDays = roundBefore
                 adapter.notifyDataSetChanged()
                 updateHeader()
             }
@@ -174,24 +178,80 @@ class MainActivity : Activity() {
         }
         val next = items.firstOrNull { !it.muted } ?: items.first()
         val d = next.daysUntil()
-        header.text = "${items.size} Geburtstage · als Nächstes: ${next.name} ${Fmt.inDays(d)}"
+        var text = "${items.size} Geburtstage · als Nächstes: ${next.name} ${Fmt.inDays(d)}"
+        val round = items.firstOrNull { !it.muted && it.isRound() && it.daysUntil() <= roundDays }
+        if (round != null) {
+            text += "\n🎉 Runder Geburtstag: ${round.name} wird ${round.turningAge()} – ${Fmt.inDays(round.daysUntil())}!"
+        }
+        header.text = text
     }
 
     // ---------- Aktionen ----------
 
     private fun showActions(b: Birthday) {
-        val muteLabel = if (b.muted) "🔔  Erinnerungen wieder an" else "🔕  Stummschalten"
-        val options = arrayOf<CharSequence>(muteLabel, "✏️  Bearbeiten", "🗑️  Löschen")
+        val ownPhoto = Photos.hasOwnPhoto(this, b.id)
+        val labels = ArrayList<CharSequence>()
+        val actions = ArrayList<() -> Unit>()
+        fun option(label: String, action: () -> Unit) {
+            labels.add(label)
+            actions.add(action)
+        }
+        option(if (b.muted) "🔔  Erinnerungen wieder an" else "🔕  Stummschalten") { toggleMute(b) }
+        option(if (ownPhoto) "📷  Anderes Foto wählen" else "📷  Foto wählen") { pickPhoto(b) }
+        if (ownPhoto) option("🖼️  Eigenes Foto entfernen") { removePhoto(b) }
+        option("✏️  Bearbeiten") { showEditDialog(b) }
+        option("🗑️  Löschen") { confirmDelete(b) }
         AlertDialog.Builder(this)
             .setTitle(b.name)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> toggleMute(b)
-                    1 -> showEditDialog(b)
-                    2 -> confirmDelete(b)
-                }
-            }
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
             .show()
+    }
+
+    private fun pickPhoto(b: Birthday) {
+        pendingPhotoId = b.id
+        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+        }
+        try {
+            startActivityForResult(android.content.Intent.createChooser(intent, "Foto für ${b.name}"), REQUEST_PHOTO)
+        } catch (e: Exception) {
+            toast("Keine Galerie-App gefunden")
+        }
+    }
+
+    private fun removePhoto(b: Birthday) {
+        Photos.delete(this, b.id)
+        adapter.notifyDataSetChanged()
+        toast("Eigenes Foto entfernt")
+    }
+
+    @Deprecated("Activity-Ergebnis")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_PHOTO) return
+        val id = pendingPhotoId ?: return
+        pendingPhotoId = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) return
+        val app = applicationContext
+        Thread {
+            val ok = try { Photos.saveFromUri(app, id, uri) } catch (e: Exception) { false }
+            runOnUiThread {
+                toast(if (ok) "Foto gespeichert ✓" else "Foto konnte nicht geladen werden")
+                adapter.notifyDataSetChanged()
+            }
+        }.start()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("pendingPhotoId", pendingPhotoId)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        pendingPhotoId = savedInstanceState.getString("pendingPhotoId")
     }
 
     private fun toggleMute(b: Birthday) {
@@ -413,6 +473,14 @@ class MainActivity : Activity() {
         }
         box.addView(hourPicker)
 
+        box.addView(label("Runde Geburtstage (30, 40, 50 …): zusätzlich so viele Tage vorher erinnern"))
+        val roundPicker = NumberPicker(this).apply {
+            minValue = 7
+            maxValue = 90
+            value = s.roundDaysBefore.coerceIn(7, 90)
+        }
+        box.addView(roundPicker)
+
         val onDay = CheckBox(this).apply {
             text = "Auch am Geburtstag selbst erinnern"
             isChecked = s.notifyOnDay
@@ -438,6 +506,7 @@ class MainActivity : Activity() {
             .setView(scroll)
             .setPositiveButton("Speichern") { _, _ ->
                 s.daysBefore = daysPicker.value
+                s.roundDaysBefore = roundPicker.value
                 s.hour = hourPicker.value
                 s.notifyOnDay = onDay.isChecked
                 s.contactsToCalendar = contactsToCal.isChecked
@@ -470,6 +539,10 @@ class MainActivity : Activity() {
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
+    companion object {
+        private const val REQUEST_PHOTO = 7
+    }
+
     // ---------- Liste ----------
 
     private inner class BirthdayAdapter : BaseAdapter() {
@@ -478,30 +551,42 @@ class MainActivity : Activity() {
         override fun getItemId(position: Int): Long = position.toLong()
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val row = convertView as? BirthdayRow ?: BirthdayRow(this@MainActivity)
-            row.bind(items[position], LocalDate.now(), daysBefore)
+            row.bind(items[position], LocalDate.now(), daysBefore, roundDays)
             return row
         }
     }
 }
 
-/** Eine Zeile in der Liste. */
+/** Eine Zeile in der Liste: Foto, Name/Datum, Tage-Anzeige. */
 class BirthdayRow(ctx: Context) : LinearLayout(ctx) {
-    private val badge = TextView(ctx)
+    private val avatarSize = ctx.dp(48)
+    private val avatarImage = android.widget.ImageView(ctx)
+    private val avatarInitials = TextView(ctx)
+    private val avatarBg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
     private val nameView = TextView(ctx)
     private val subView = TextView(ctx)
-    private val iconView = TextView(ctx)
-    private val badgeBg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
+    private val badge = TextView(ctx)
+    private val badgeBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = ctx.dp(14).toFloat()
+    }
+    private val rowBg = GradientDrawable().apply { cornerRadius = ctx.dp(12).toFloat() }
+    private var photoKey: String? = null
 
     init {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(ctx.dp(16), ctx.dp(10), ctx.dp(16), ctx.dp(10))
+        setPadding(ctx.dp(16), ctx.dp(10), ctx.dp(12), ctx.dp(10))
 
-        badge.gravity = Gravity.CENTER
-        badge.textSize = 12f
-        badge.setTypeface(badge.typeface, Typeface.BOLD)
-        badge.background = badgeBg
-        addView(badge, LinearLayout.LayoutParams(ctx.dp(52), ctx.dp(52)))
+        val avatar = android.widget.FrameLayout(ctx)
+        avatarInitials.gravity = Gravity.CENTER
+        avatarInitials.textSize = 17f
+        avatarInitials.setTypeface(avatarInitials.typeface, Typeface.BOLD)
+        avatarInitials.setTextColor(Color.WHITE)
+        avatarInitials.background = avatarBg
+        avatar.addView(avatarInitials, android.widget.FrameLayout.LayoutParams(avatarSize, avatarSize))
+        avatar.addView(avatarImage, android.widget.FrameLayout.LayoutParams(avatarSize, avatarSize))
+        addView(avatar, LinearLayout.LayoutParams(avatarSize, avatarSize))
 
         val mid = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -510,50 +595,95 @@ class BirthdayRow(ctx: Context) : LinearLayout(ctx) {
         nameView.textSize = 17f
         nameView.setTypeface(nameView.typeface, Typeface.BOLD)
         subView.textSize = 13f
-        subView.alpha = 0.7f
         mid.addView(nameView)
         mid.addView(subView)
         addView(mid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        iconView.textSize = 18f
-        addView(iconView)
+        badge.gravity = Gravity.CENTER
+        badge.textSize = 12f
+        badge.setTypeface(badge.typeface, Typeface.BOLD)
+        badge.background = badgeBg
+        badge.setPadding(ctx.dp(10), ctx.dp(4), ctx.dp(10), ctx.dp(4))
+        addView(badge, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    fun bind(b: Birthday, today: LocalDate, daysBefore: Int) {
+    fun bind(b: Birthday, today: LocalDate, daysBefore: Int, roundDays: Int) {
         val d = b.daysUntil(today)
+        val age = b.turningAge(today)
+        val round = Birthday.isRoundAge(age) && d <= roundDays && !b.muted
+
+        // Foto oder Initialen
+        avatarInitials.text = initials(b.name)
+        avatarBg.setColor(colorFor(b.name))
+        avatarImage.setImageDrawable(null)
+        photoKey = Photos.loadAsync(context, b, avatarSize) { key, bmp ->
+            post { if (photoKey == key) avatarImage.setImageBitmap(bmp) }
+        }
+
+        // Tage-Anzeige rechts
         when {
             d == 0 -> {
-                badge.text = "🎂\nHeute"
+                badge.text = "🎂 Heute"
                 badgeBg.setColor(Color.parseColor("#E91E63"))
                 badge.setTextColor(Color.WHITE)
             }
+            round -> {
+                badge.text = if (d == 1) "🎉 morgen" else "🎉 $d Tage"
+                badgeBg.setColor(Color.parseColor("#FFB300"))
+                badge.setTextColor(Color.BLACK)
+            }
             d <= daysBefore -> {
-                badge.text = if (d == 1) "1\nTag" else "$d\nTage"
+                badge.text = if (d == 1) "morgen" else "$d Tage"
                 badgeBg.setColor(Color.parseColor("#FF9800"))
                 badge.setTextColor(Color.WHITE)
             }
             else -> {
-                badge.text = "$d\nTage"
-                badgeBg.setColor(Color.parseColor("#33888888"))
+                badge.text = "$d Tage"
+                badgeBg.setColor(Color.parseColor("#22888888"))
                 badge.setTextColor(nameView.currentTextColor)
             }
         }
         if (b.muted) badgeBg.setColor(Color.parseColor("#22888888"))
 
-        nameView.text = b.name
-        nameView.alpha = if (b.muted) 0.5f else 1f
-
-        val age = b.turningAge(today)
-        val parts = mutableListOf(Fmt.date(b.month, b.day, null))
-        if (age != null) parts.add("wird $age")
-        if (b.muted) parts.add("stumm")
-        subView.text = parts.joinToString(" · ")
+        // Runde Geburtstage bekommen einen goldenen Hintergrund
+        if (round) {
+            rowBg.setColor(Color.parseColor("#33FFC107"))
+            background = rowBg
+        } else {
+            background = null
+        }
 
         val source = when (b.source) {
-            SOURCE_CONTACT -> "📇"
-            SOURCE_CALENDAR -> "📅"
+            SOURCE_CONTACT -> " 📇"
+            SOURCE_CALENDAR -> " 📅"
             else -> ""
         }
-        iconView.text = (if (b.muted) "🔕 " else "") + source
+        nameView.text = (if (b.muted) "🔕 " else "") + b.name + source
+        nameView.alpha = if (b.muted) 0.5f else 1f
+
+        val parts = mutableListOf(Fmt.date(b.month, b.day, null))
+        if (round) {
+            parts.add("🎉 wird $age – runder Geburtstag!")
+            subView.setTypeface(null, Typeface.BOLD)
+            subView.alpha = 1f
+        } else {
+            if (age != null) parts.add("wird $age")
+            if (b.muted) parts.add("stumm")
+            subView.setTypeface(null, Typeface.NORMAL)
+            subView.alpha = 0.7f
+        }
+        subView.text = parts.joinToString(" · ")
+    }
+
+    private fun initials(name: String): String =
+        name.split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2)
+            .joinToString("") { it.substring(0, 1).uppercase() }.ifEmpty { "?" }
+
+    private fun colorFor(name: String): Int {
+        val colors = intArrayOf(
+            0xFFE91E63.toInt(), 0xFF9C27B0.toInt(), 0xFF3F51B5.toInt(), 0xFF009688.toInt(),
+            0xFFFF5722.toInt(), 0xFF795548.toInt(), 0xFF607D8B.toInt(), 0xFF4CAF50.toInt()
+        )
+        return colors[Math.floorMod(name.hashCode(), colors.size)]
     }
 }

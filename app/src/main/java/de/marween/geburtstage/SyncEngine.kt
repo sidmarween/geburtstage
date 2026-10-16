@@ -37,6 +37,7 @@ object SyncEngine {
             val b = list.firstOrNull { it.id == id } ?: return@mutate
             b.sourceKey?.let { store.ignored = store.ignored + it }
             list.remove(b)
+            Photos.delete(ctx, b.id)
         }
     }
 
@@ -70,6 +71,18 @@ object SyncEngine {
             if (n > 0) notes.add("$n neu aus dem Kalender")
         } else {
             notes.add("kein Kalenderzugriff")
+        }
+
+        // Fotos: passenden Kontakt zuordnen (eigener Kontakt oder gleicher Name)
+        if (contacts != null) {
+            val withPhoto = try { ContactsImport.contactsWithPhoto(ctx) } catch (e: Exception) { emptyMap() }
+            for (b in list) {
+                b.contactLookup = if (b.source == SOURCE_CONTACT) {
+                    b.sourceKey?.removePrefix("contact:")
+                } else {
+                    withPhoto[ContactsImport.normalize(b.name)]
+                }
+            }
         }
 
         // Beim ersten Mal automatisch den Google-Hauptkalender wählen

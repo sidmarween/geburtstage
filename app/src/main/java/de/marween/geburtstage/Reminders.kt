@@ -10,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.drawable.Icon
 import android.os.Build
 import java.time.LocalDate
@@ -23,11 +24,21 @@ object Reminders {
     const val ACTION_MUTE = "de.marween.geburtstage.MUTE"
     const val EXTRA_ID = "id"
 
+    const val CHANNEL_ROUND = "runde_geburtstage"
+
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
             val ch = NotificationChannel(CHANNEL, "Geburtstags-Erinnerungen", NotificationManager.IMPORTANCE_DEFAULT)
             ch.description = "Erinnert dich vor Geburtstagen"
+            nm.createNotificationChannel(ch)
+        }
+        if (nm.getNotificationChannel(CHANNEL_ROUND) == null) {
+            val ch = NotificationChannel(CHANNEL_ROUND, "Runde Geburtstage", NotificationManager.IMPORTANCE_HIGH)
+            ch.description = "Besonders auffällige Erinnerung an runde Geburtstage (30, 40, 50 …)"
+            ch.enableLights(true)
+            ch.lightColor = Color.parseColor("#FFB300")
+            ch.enableVibration(true)
             nm.createNotificationChannel(ch)
         }
     }
@@ -53,6 +64,7 @@ object Reminders {
         val list = store.load()
         val today = LocalDate.now()
         val daysBefore = store.daysBefore
+        val roundDays = store.roundDaysBefore
 
         // Alte Einträge im Protokoll aufräumen
         val log = store.notified.filter { entry ->
@@ -67,10 +79,15 @@ object Reminders {
             if (b.muted) continue
             val d = b.daysUntil(today)
             val next = b.nextDate(today)
+            val round = b.isRound(today)
             if (d == 0) {
-                if (store.notifyOnDay && log.add("${b.id}|day|$next")) notify(ctx, b, 0)
+                // Am runden Geburtstag immer erinnern
+                if ((store.notifyOnDay || round) && log.add("${b.id}|day|$next")) notify(ctx, b, 0)
             } else if (d <= daysBefore) {
                 if (log.add("${b.id}|pre|$next")) notify(ctx, b, d)
+            } else if (round && d <= roundDays) {
+                // Runde Geburtstage: zusätzliche frühe Erinnerung
+                if (log.add("${b.id}|round|$next")) notify(ctx, b, d)
             }
         }
         store.notified = log
@@ -82,14 +99,28 @@ object Reminders {
         ) return
         ensureChannel(ctx)
 
-        val title = when (days) {
-            0 -> "🎂 ${b.name} hat heute Geburtstag!"
-            1 -> "🎂 ${b.name} hat morgen Geburtstag"
-            else -> "🎂 ${b.name} hat in $days Tagen Geburtstag"
-        }
         val age = b.turningAge()
         val next = b.nextDate()
-        val text = Fmt.date(next.monthValue, next.dayOfMonth, null) + (if (age != null) " · wird $age" else "")
+        val round = Birthday.isRoundAge(age)
+        val dateText = Fmt.date(next.monthValue, next.dayOfMonth, null)
+
+        val title: String
+        val text: String
+        if (round) {
+            title = "🎉 RUNDER GEBURTSTAG: ${b.name} wird $age!"
+            text = when (days) {
+                0 -> "Heute ist der große Tag! 🥳"
+                1 -> "Schon morgen ($dateText)!"
+                else -> "In $days Tagen, am $dateText – Zeit für ein besonderes Geschenk oder eine Feier 🎁"
+            }
+        } else {
+            title = when (days) {
+                0 -> "🎂 ${b.name} hat heute Geburtstag!"
+                1 -> "🎂 ${b.name} hat morgen Geburtstag"
+                else -> "🎂 ${b.name} hat in $days Tagen Geburtstag"
+            }
+            text = dateText + (if (age != null) " · wird $age" else "")
+        }
 
         val open = PendingIntent.getActivity(
             ctx, 0, Intent(ctx, MainActivity::class.java),
@@ -106,14 +137,18 @@ object Reminders {
             Icon.createWithResource(ctx, R.drawable.ic_mute), "Stummschalten", mutePi
         ).build()
 
-        val n = Notification.Builder(ctx, CHANNEL)
+        val builder = Notification.Builder(ctx, if (round) CHANNEL_ROUND else CHANNEL)
             .setSmallIcon(R.drawable.ic_cake)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)
             .setAutoCancel(true)
             .addAction(muteAction)
-            .build()
+        if (round) builder.setColor(Color.parseColor("#FFB300"))
+        val photo = try { Photos.load(ctx, b, 256) } catch (e: Exception) { null }
+        if (photo != null) builder.setLargeIcon(photo)
+        val n = builder.build()
         ctx.getSystemService(NotificationManager::class.java).notify(b.id.hashCode(), n)
     }
 }
