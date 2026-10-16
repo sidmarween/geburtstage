@@ -77,6 +77,14 @@ class MainActivity : Activity() {
             setPadding(0, dp(2), 0, dp(8))
         }
 
+        val logo = android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.logo)
+            adjustViewBounds = true
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Wer hat hier Geburtstag???"
+            setPadding(dp(24), dp(12), dp(24), 0)
+        }
+        root.addView(logo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(110)))
         root.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(emptyView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(listView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
